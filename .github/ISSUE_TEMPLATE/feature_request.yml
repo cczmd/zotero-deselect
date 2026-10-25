@@ -1,0 +1,42 @@
+name: Feature request
+description: Suggest an improvement for Zotero Deselect
+title: "[Feature] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Please keep requests focused on Zotero Deselect's click-away deselection behavior.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What workflow or interaction are you trying to improve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the behavior you would like Zotero Deselect to add or change.
+    validations:
+      required: true
+  - type: input
+    id: zotero-version
+    attributes:
+      label: Zotero version
+      placeholder: e.g. 10.0.6
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - Other
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Add examples or screenshots if useful. Please remove private library information first.
