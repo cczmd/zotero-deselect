@@ -4,95 +4,123 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Existing release tag to build, for example v0.2.9"
-        required: true
-        type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: zotero-release
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Resolve and validate version
+      - name: Validate repository and version
         id: version
         shell: bash
         run: |
           set -euo pipefail
 
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            TAG="${{ inputs.tag }}"
-            git fetch --force --tags
-            git checkout "${TAG}"
-          else
-            TAG="${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_REPOSITORY}" != "cczmd/zotero-deselect" ]]; then
+            echo "Refusing to publish from an unexpected repository: ${GITHUB_REPOSITORY}" >&2
+            exit 1
           fi
 
-          if [[ "${TAG}" != v* ]]; then
-            echo "Release tag must start with v (for example v0.2.9)." >&2
+          TAG="${GITHUB_REF_NAME}"
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must use semantic version format, for example v0.2.9." >&2
             exit 1
           fi
 
           VERSION="${TAG#v}"
           MANIFEST_VERSION="$(python3 -c 'import json; print(json.load(open("manifest.json"))["version"])')"
+          ADDON_ID="$(python3 -c 'import json; print(json.load(open("manifest.json"))["applications"]["zotero"]["id"])')"
+          UPDATE_URL="$(python3 -c 'import json; print(json.load(open("manifest.json"))["applications"]["zotero"]["update_url"])')"
           MIN_VERSION="$(python3 -c 'import json; print(json.load(open("manifest.json"))["applications"]["zotero"]["strict_min_version"])')"
           MAX_VERSION="$(python3 -c 'import json; print(json.load(open("manifest.json"))["applications"]["zotero"]["strict_max_version"])')"
 
-          if [[ "${VERSION}" != "${MANIFEST_VERSION}" ]]; then
-            echo "Tag ${TAG} does not match manifest.json version ${MANIFEST_VERSION}." >&2
-            exit 1
-          fi
+          [[ "${VERSION}" == "${MANIFEST_VERSION}" ]] || { echo "Tag ${TAG} does not match manifest version ${MANIFEST_VERSION}." >&2; exit 1; }
+          [[ "${ADDON_ID}" == "zotero-deselect@local" ]] || { echo "Unexpected add-on ID: ${ADDON_ID}" >&2; exit 1; }
+          [[ "${UPDATE_URL}" == "https://raw.githubusercontent.com/cczmd/zotero-deselect/main/updates.json" ]] || { echo "Unexpected update URL: ${UPDATE_URL}" >&2; exit 1; }
 
           echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
           echo "min_version=${MIN_VERSION}" >> "${GITHUB_OUTPUT}"
           echo "max_version=${MAX_VERSION}" >> "${GITHUB_OUTPUT}"
 
-      - name: Build XPI and calculate SHA-256
+      - name: Refuse to overwrite an existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists. Refusing to replace published assets." >&2
+            exit 1
+          fi
+
+      - name: Build XPI and checksum
         id: build
         shell: bash
         run: |
           set -euo pipefail
 
           XPI="zotero-deselect-${{ steps.version.outputs.version }}.xpi"
-          rm -f "${XPI}"
+          CHECKSUM="${XPI}.sha256"
+          rm -f "${XPI}" "${CHECKSUM}"
           zip -9 "${XPI}" bootstrap.js manifest.json icon.png icon@2x.png icon.svg
 
           SHA256="$(sha256sum "${XPI}" | awk '{print $1}')"
+          printf '%s  %s\n' "${SHA256}" "${XPI}" > "${CHECKSUM}"
+
           echo "xpi=${XPI}" >> "${GITHUB_OUTPUT}"
+          echo "checksum=${CHECKSUM}" >> "${GITHUB_OUTPUT}"
           echo "sha256=${SHA256}" >> "${GITHUB_OUTPUT}"
 
-      - name: Create or update GitHub Release
+      - name: Create immutable GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
           XPI: ${{ steps.build.outputs.xpi }}
+          CHECKSUM: ${{ steps.build.outputs.checksum }}
         shell: bash
         run: |
           set -euo pipefail
+          gh release create "${TAG}" "${XPI}" "${CHECKSUM}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Zotero Deselect ${VERSION}" \
+            --generate-notes
 
-          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            gh release upload "${TAG}" "${XPI}" --clobber --repo "${GITHUB_REPOSITORY}"
-          else
-            gh release create "${TAG}" "${XPI}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --title "Zotero Deselect ${VERSION}" \
-              --generate-notes
-          fi
+      - name: Verify uploaded release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          XPI: ${{ steps.build.outputs.xpi }}
+          SHA256: ${{ steps.build.outputs.sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p verify
+          gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" --pattern "${XPI}" --dir verify
+          DOWNLOADED_SHA256="$(sha256sum "verify/${XPI}" | awk '{print $1}')"
+          [[ "${DOWNLOADED_SHA256}" == "${SHA256}" ]] || { echo "Release asset hash verification failed." >&2; exit 1; }
 
       - name: Update Zotero update feed on main
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
           SHA256: ${{ steps.build.outputs.sha256 }}
@@ -103,7 +131,7 @@ jobs:
           set -euo pipefail
 
           git fetch origin main
-          git switch -C main origin/main
+          git show origin/main:updates.json > updates.json
 
           python3 <<'PY'
           import json
@@ -118,11 +146,7 @@ jobs:
           min_version = os.environ["MIN_VERSION"]
           max_version = os.environ["MAX_VERSION"]
 
-          if path.exists():
-              data = json.loads(path.read_text(encoding="utf-8"))
-          else:
-              data = {"addons": {}}
-
+          data = json.loads(path.read_text(encoding="utf-8"))
           addons = data.setdefault("addons", {})
           addon = addons.setdefault(addon_id, {"updates": []})
           updates = [u for u in addon.get("updates", []) if u.get("version") != version]
@@ -149,13 +173,12 @@ jobs:
           path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
           PY
 
-          if git diff --quiet -- updates.json; then
-            echo "updates.json is already current."
-            exit 0
-          fi
+          CURRENT_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/contents/updates.json?ref=main" --jq .sha)"
+          CONTENT="$(base64 -w 0 updates.json)"
+          jq -n \
+            --arg message "chore: update feed for ${TAG}" \
+            --arg content "${CONTENT}" \
+            --arg sha "${CURRENT_SHA}" \
+            '{message:$message, content:$content, sha:$sha, branch:"main"}' > payload.json
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add updates.json
-          git commit -m "chore: update feed for ${TAG}"
-          git push origin HEAD:main
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/updates.json" --input payload.json >/dev/null
