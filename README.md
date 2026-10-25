@@ -7,7 +7,7 @@
 
 ## Demo
 
-[▶ Watch the demo video](demo.mp4)
+https://github.com/user-attachments/assets/f10d6b60-6fa3-45c6-b946-8f67454d015e
 
 ## What it does
 
@@ -50,7 +50,7 @@ The plugin listens for primary-button clicks in Zotero's item list and collectio
 
 ## 演示
 
-[▶ 查看演示视频](demo.mp4)
+https://github.com/user-attachments/assets/f10d6b60-6fa3-45c6-b946-8f67454d015e
 
 ## 功能简介
 
