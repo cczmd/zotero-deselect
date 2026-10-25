@@ -1,0 +1,5 @@
+* @cczmd
+/.github/workflows/ @cczmd
+/manifest.json @cczmd
+/updates.json @cczmd
+/bootstrap.js @cczmd
