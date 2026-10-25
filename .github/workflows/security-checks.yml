@@ -1,0 +1,75 @@
+name: Security checks
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate manifest and update feed
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          manifest = json.loads(Path("manifest.json").read_text(encoding="utf-8"))
+          updates = json.loads(Path("updates.json").read_text(encoding="utf-8"))
+
+          zotero = manifest["applications"]["zotero"]
+          assert zotero["id"] == "zotero-deselect@local", "Unexpected add-on ID"
+          assert zotero["update_url"] == "https://raw.githubusercontent.com/cczmd/zotero-deselect/main/updates.json", "Unexpected update URL"
+          assert manifest["homepage_url"] == "https://github.com/cczmd/zotero-deselect", "Unexpected homepage URL"
+
+          addon = updates["addons"]["zotero-deselect@local"]
+          assert addon["updates"], "Update feed must not be empty"
+
+          for item in addon["updates"]:
+              version = item["version"]
+              expected_prefix = f"https://github.com/cczmd/zotero-deselect/releases/download/v{version}/zotero-deselect-{version}.xpi"
+              assert item["update_link"] == expected_prefix, f"Unexpected update link for {version}"
+              assert re.fullmatch(r"sha256:[0-9a-f]{64}", item["update_hash"]), f"Invalid SHA-256 for {version}"
+          PY
+
+      - name: Enforce minimal-risk plugin policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          source = Path("bootstrap.js").read_text(encoding="utf-8")
+          forbidden = {
+              "network request": ["fetch(", "XMLHttpRequest", "WebSocket", "Zotero.HTTP", "nsIHttpChannel"],
+              "dynamic code execution": ["eval(", "new Function(", "evalInSandbox"],
+              "filesystem access": ["OS.File", "IOUtils", "Zotero.File"],
+              "process execution": ["nsIProcess", "Subprocess", "child_process"],
+          }
+
+          violations = []
+          for category, tokens in forbidden.items():
+              for token in tokens:
+                  if token in source:
+                      violations.append(f"{category}: {token}")
+
+          if violations:
+              raise SystemExit("Forbidden capability detected in bootstrap.js:\n- " + "\n- ".join(violations))
+          PY
