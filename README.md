@@ -5,6 +5,10 @@
 <details open>
 <summary><strong>English</strong></summary>
 
+## Demo
+
+[▶ Watch the demo video](demo.mov)
+
 ## What it does
 
 Zotero Deselect brings familiar desktop file-manager deselection behavior to Zotero's item list and collection pane.
@@ -43,6 +47,10 @@ The plugin listens for primary-button clicks in Zotero's item list and collectio
 
 <details>
 <summary><strong>简体中文</strong></summary>
+
+## 演示
+
+[▶ 查看演示视频](demo.mov)
 
 ## 功能简介
 
