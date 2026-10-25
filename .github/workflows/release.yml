@@ -1,0 +1,161 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to build, for example v0.2.9"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Resolve and validate version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            TAG="${{ inputs.tag }}"
+            git fetch --force --tags
+            git checkout "${TAG}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ "${TAG}" != v* ]]; then
+            echo "Release tag must start with v (for example v0.2.9)." >&2
+            exit 1
+          fi
+
+          VERSION="${TAG#v}"
+          MANIFEST_VERSION="$(python3 -c 'import json; print(json.load(open("manifest.json"))["version"])')"
+          MIN_VERSION="$(python3 -c 'import json; print(json.load(open("manifest.json"))["applications"]["zotero"]["strict_min_version"])')"
+          MAX_VERSION="$(python3 -c 'import json; print(json.load(open("manifest.json"))["applications"]["zotero"]["strict_max_version"])')"
+
+          if [[ "${VERSION}" != "${MANIFEST_VERSION}" ]]; then
+            echo "Tag ${TAG} does not match manifest.json version ${MANIFEST_VERSION}." >&2
+            exit 1
+          fi
+
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "min_version=${MIN_VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "max_version=${MAX_VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build XPI and calculate SHA-256
+        id: build
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          XPI="zotero-deselect-${{ steps.version.outputs.version }}.xpi"
+          rm -f "${XPI}"
+          zip -9 "${XPI}" bootstrap.js manifest.json icon.png icon@2x.png icon.svg
+
+          SHA256="$(sha256sum "${XPI}" | awk '{print $1}')"
+          echo "xpi=${XPI}" >> "${GITHUB_OUTPUT}"
+          echo "sha256=${SHA256}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          XPI: ${{ steps.build.outputs.xpi }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" "${XPI}" --clobber --repo "${GITHUB_REPOSITORY}"
+          else
+            gh release create "${TAG}" "${XPI}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "Zotero Deselect ${VERSION}" \
+              --generate-notes
+          fi
+
+      - name: Update Zotero update feed on main
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA256: ${{ steps.build.outputs.sha256 }}
+          MIN_VERSION: ${{ steps.version.outputs.min_version }}
+          MAX_VERSION: ${{ steps.version.outputs.max_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch origin main
+          git switch -C main origin/main
+
+          python3 <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path("updates.json")
+          addon_id = "zotero-deselect@local"
+          version = os.environ["VERSION"]
+          tag = os.environ["TAG"]
+          sha256 = os.environ["SHA256"]
+          min_version = os.environ["MIN_VERSION"]
+          max_version = os.environ["MAX_VERSION"]
+
+          if path.exists():
+              data = json.loads(path.read_text(encoding="utf-8"))
+          else:
+              data = {"addons": {}}
+
+          addons = data.setdefault("addons", {})
+          addon = addons.setdefault(addon_id, {"updates": []})
+          updates = [u for u in addon.get("updates", []) if u.get("version") != version]
+
+          updates.append({
+              "version": version,
+              "update_link": f"https://github.com/cczmd/zotero-deselect/releases/download/{tag}/zotero-deselect-{version}.xpi",
+              "update_hash": f"sha256:{sha256}",
+              "applications": {
+                  "zotero": {
+                      "strict_min_version": min_version,
+                      "strict_max_version": max_version,
+                  }
+              },
+          })
+
+          def version_key(item):
+              try:
+                  return tuple(int(part) for part in item["version"].split("."))
+              except (KeyError, ValueError):
+                  return (0,)
+
+          addon["updates"] = sorted(updates, key=version_key, reverse=True)[:10]
+          path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+          PY
+
+          if git diff --quiet -- updates.json; then
+            echo "updates.json is already current."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add updates.json
+          git commit -m "chore: update feed for ${TAG}"
+          git push origin HEAD:main
