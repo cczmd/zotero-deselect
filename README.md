@@ -39,6 +39,10 @@ Tested with **Zotero 10.0.6 on macOS**.
 
 The manifest declares compatibility with Zotero 10.0.x (`10.0` through `10.0.*`). Other platforms and versions have not yet been tested.
 
+## Security & privacy
+
+Zotero Deselect is designed without telemetry, analytics, network requests, Zotero database writes, or operating-system command execution. See the [Security Policy](SECURITY.md) for reporting and release-integrity details.
+
 ## How it works
 
 The plugin listens for primary-button clicks in Zotero's item list and collection pane. When a click lands on empty space, it clears the relevant visual selection state while preserving Zotero's normal browsing behavior. In the collection pane, the current collection remains active internally so the displayed items do not change.
@@ -83,6 +87,10 @@ Zotero 默认不会采用这种交互。Zotero Deselect 的目的，就是把这
 目前已在 **macOS + Zotero 10.0.6** 上实际测试。
 
 插件清单声明兼容 Zotero 10.0.x（`10.0` 至 `10.0.*`）。其他系统和版本目前尚未实际测试，因此不会做额外兼容性承诺。
+
+## 安全与隐私
+
+Zotero Deselect 的设计不包含遥测、分析统计、网络请求、Zotero 数据库写入或操作系统命令执行。漏洞报告和发布完整性说明请参见 [Security Policy](SECURITY.md)。
 
 ## 工作原理
 
