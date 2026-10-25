@@ -1,0 +1,12 @@
+.DS_Store
+._*
+__MACOSX/
+*.log
+*.tmp
+*.swp
+*~
+node_modules/
+__pycache__/
+.pytest_cache/
+.cache/
+work/

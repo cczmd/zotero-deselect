@@ -1,0 +1,19 @@
+{
+  "addons": {
+    "zotero-deselect@local": {
+      "updates": [
+        {
+          "version": "0.2.8",
+          "update_link": "https://github.com/cczmd/zotero-deselect/releases/download/v0.2.8/zotero-deselect-0.2.8.xpi",
+          "update_hash": "sha256:1473f7154503bcd792d9aa0fff54e7ca1fbcdbc4d05db0d31d0e35fcaa1d7124",
+          "applications": {
+            "zotero": {
+              "strict_min_version": "10.0",
+              "strict_max_version": "10.0.*"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
