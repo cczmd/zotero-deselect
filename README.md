@@ -98,6 +98,10 @@ Zotero Deselect 的设计不包含遥测、分析统计、网络请求、Zotero 
 
 </details>
 
+## Community / Discussion
+
+[Zotero Forums — Zotero Deselect](https://forums.zotero.org/discussion/134442/plugin-zotero-deselect-click-empty-space-to-deselect-like-finder-and-windows-file-explorer)
+
 ## License
 
 [MIT License](LICENSE). Copyright (c) 2026 Zotero Deselect contributors.
